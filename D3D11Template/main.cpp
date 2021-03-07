@@ -90,7 +90,7 @@ private:
 	ID3D11Texture2D* multisampleTexture;
 	ID3D11RenderTargetView* multisampleRTV;
 
-	bool useMultisampling = false;
+	bool useMultisampling = true;
 	DXGI_FORMAT multisampleFormat = DXGI_FORMAT_UNKNOWN;
 	uint32_t multisampleCount = 4;
 	int multisampleQuality = D3D11_STANDARD_MULTISAMPLE_PATTERN;
