@@ -12,6 +12,7 @@
 #include <sstream>
 #include <vector>
 #include <fstream>
+#include <cassert>
 
 struct GraphicsPipeline {
 	D3D_PRIMITIVE_TOPOLOGY primitiveTopology;
@@ -50,6 +51,12 @@ public:
 		std::cout << "Glfw error " << std::hex << error << std::dec << ": " << description << "\n";
 	}
 
+	static void GlfwWindowSizeCallback(GLFWwindow* window, int width, int height) {
+		auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+		app->OnWindowResized(width, height);
+	}
+
 	static std::vector<char> readFile(const std::string& filename) {
 		std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
@@ -75,6 +82,7 @@ private:
 
 	ID3D11Device* device;
 	ID3D11DeviceContext* context;
+	uint32_t numSwapChainBuffers;
 	IDXGISwapChain* swapChain;
 	DXGI_FORMAT swapChainFormat = DXGI_FORMAT_UNKNOWN;
 	GraphicsPipeline* graphicsPipeline;
@@ -133,6 +141,8 @@ private:
 		}
 
 		glfwSetWindowUserPointer(window, this);
+
+		glfwSetWindowSizeCallback(window, GlfwWindowSizeCallback);
 	}
 
 	void createDeviceAndSwapChain() {
@@ -150,6 +160,7 @@ private:
 		int32_t width, height;
 		glfwGetWindowSize(window, &width, &height);
 
+		numSwapChainBuffers = 2;
 		swapChainFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
 		multisampleFormat = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
 
@@ -166,7 +177,7 @@ private:
 		swapChainDesc.SampleDesc.Count = 1;
 		swapChainDesc.SampleDesc.Quality = 0;
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-		swapChainDesc.BufferCount = 2; // TODO WT: 3 buffers for mailbox?
+		swapChainDesc.BufferCount = numSwapChainBuffers; // TODO WT: 3 buffers for mailbox?
 		swapChainDesc.OutputWindow = hwnd;
 		swapChainDesc.Windowed = true;
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -295,6 +306,37 @@ private:
 		backBuffer->Release();
 
 		swapChain->Present(1, 0);
+	}
+
+	void OnWindowResized(uint32_t width, uint32_t height) {
+		swapChain->ResizeBuffers(numSwapChainBuffers, width, height, swapChainFormat, 0);
+
+		D3D11_TEXTURE2D_DESC textureDesc;
+		multisampleTexture->GetDesc(&textureDesc);
+		multisampleTexture->Release();
+
+		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc;
+		multisampleRTV->GetDesc(&rtvDesc);
+		multisampleRTV->Release();
+
+		textureDesc.Width = width;
+		textureDesc.Height = height;
+
+		if (FAILED(device->CreateTexture2D(&textureDesc, nullptr, &multisampleTexture))) {
+			throw std::runtime_error("Failed to recreate multisample texture!");
+		}
+		assert(multisampleTexture);
+
+		if (FAILED(device->CreateRenderTargetView(multisampleTexture, &rtvDesc, &multisampleRTV))) {
+			throw std::runtime_error("Failed to recreate multisample texture RTV!");
+		}
+		assert(multisampleRTV);
+
+		graphicsPipeline->viewport.Width = static_cast<float>(width);
+		graphicsPipeline->viewport.Height = static_cast<float>(height);
+
+		graphicsPipeline->scissor.right = width;
+		graphicsPipeline->scissor.bottom = height;
 	}
 };
 
