@@ -16,32 +16,113 @@
 
 struct GraphicsPipeline {
 	D3D_PRIMITIVE_TOPOLOGY primitiveTopology;
+	ID3D11InputLayout* inputLayout;
 
 	ID3D11VertexShader* vertexShader;
-	ID3D11RasterizerState* rasterizerState;
-	ID3D11PixelShader* pixelShader;
 
+	ID3D11RasterizerState* rasterizerState;
 	D3D11_VIEWPORT viewport;
 	D3D11_RECT scissor;
 
+	ID3D11PixelShader* pixelShader;
+
+	float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	uint32_t sampleMask = 0xffffffff;
+	ID3D11BlendState* blendState;
+	ID3D11DepthStencilState* depthStencilState;
+
+	GraphicsPipeline(
+		ID3D11Device* device,
+		D3D_PRIMITIVE_TOPOLOGY primitiveTopology,
+		D3D11_INPUT_ELEMENT_DESC* inputElementDescs,
+		uint32_t numInputElements,
+		std::vector<char> vertexShaderBytecode,
+		std::vector<char> pixelShaderBytecode,
+		D3D11_RASTERIZER_DESC rasterizerDesc,
+		D3D11_VIEWPORT viewport,
+		D3D11_RECT scissor,
+		D3D11_DEPTH_STENCIL_DESC depthStencilDesc,
+		D3D11_BLEND_DESC blendDesc,
+		float blendFactor[4],
+		uint32_t blendSampleMask
+	): primitiveTopology(primitiveTopology), viewport(viewport), scissor(scissor), sampleMask(blendSampleMask) {
+		memcpy(this->blendFactor, blendFactor, ARRAYSIZE(this->blendFactor));
+
+		device->CreateInputLayout(
+			inputElementDescs,
+			numInputElements,
+			vertexShaderBytecode.data(),
+			vertexShaderBytecode.size(),
+			&inputLayout
+		);
+
+		device->CreateVertexShader(
+			vertexShaderBytecode.data(),
+			vertexShaderBytecode.size(),
+			nullptr,
+			&vertexShader
+		);
+
+		device->CreatePixelShader(
+			pixelShaderBytecode.data(),
+			pixelShaderBytecode.size(),
+			nullptr,
+			&pixelShader
+		);
+
+		device->CreateRasterizerState(
+			&rasterizerDesc,
+			&rasterizerState
+		);
+
+		device->CreateDepthStencilState(
+			&depthStencilDesc,
+			&depthStencilState
+		);
+
+		device->CreateBlendState(
+			&blendDesc,
+			&blendState
+		);
+	}
+
 	~GraphicsPipeline() {
+		if (inputLayout)
+			inputLayout->Release();
+
 		vertexShader->Release();
+
 		rasterizerState->Release();
+
 		pixelShader->Release();
+
+		depthStencilState->Release();
+
+		blendState->Release();
 	}
 
 	void bind(ID3D11DeviceContext* context) {
 		context->IASetPrimitiveTopology(primitiveTopology);
 
-		if (vertexShader)
-			context->VSSetShader(vertexShader, nullptr, 0);
+		context->VSSetShader(vertexShader, nullptr, 0);
 
 		context->RSSetState(rasterizerState);
 		context->RSSetViewports(1, &viewport);
 		context->RSSetScissorRects(1, &scissor);
 
-		if (pixelShader)
-			context->PSSetShader(pixelShader, nullptr, 0);
+		context->PSSetShader(pixelShader, nullptr, 0);
+
+		// TODO WT: Allow stencil ref.
+		context->OMSetDepthStencilState(depthStencilState, 0);
+		context->OMSetBlendState(blendState, blendFactor, sampleMask);
+	}
+	
+	void resize(uint32_t width, uint32_t height) {
+		viewport.Width = static_cast<float>(width);
+		viewport.Height = static_cast<float>(height);
+
+		scissor.right = width;
+		scissor.bottom = height;
 	}
 };
 
@@ -238,12 +319,6 @@ private:
 		std::vector<char> vertexShaderCode = readFile("shaders/vertex.cso");
 		std::vector<char> pixelShaderCode = readFile("shaders/pixel.cso");
 
-		ID3D11VertexShader* vertexShader;
-		ID3D11PixelShader* pixelShader;
-
-		device->CreateVertexShader(vertexShaderCode.data(), vertexShaderCode.size(), nullptr, &vertexShader);
-		device->CreatePixelShader(pixelShaderCode.data(), pixelShaderCode.size(), nullptr, &pixelShader);
-
 		D3D11_RASTERIZER_DESC rasterizerDesc{};
 		rasterizerDesc.FillMode = D3D11_FILL_SOLID;
 		rasterizerDesc.CullMode = D3D11_CULL_BACK;
@@ -255,9 +330,6 @@ private:
 		rasterizerDesc.ScissorEnable = true;
 		rasterizerDesc.MultisampleEnable = useMultisampling;
 		rasterizerDesc.AntialiasedLineEnable = false;
-
-		ID3D11RasterizerState* rasterizerState;
-		device->CreateRasterizerState(&rasterizerDesc, &rasterizerState);
 
 		int width, height;
 		glfwGetWindowSize(window, &width, &height);
@@ -276,13 +348,52 @@ private:
 		scissor.right = width;
 		scissor.bottom = height;
 
-		graphicsPipeline = new GraphicsPipeline();
-		graphicsPipeline->primitiveTopology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-		graphicsPipeline->vertexShader = vertexShader;
-		graphicsPipeline->rasterizerState = rasterizerState;
-		graphicsPipeline->pixelShader = pixelShader;
-		graphicsPipeline->viewport = viewport;
-		graphicsPipeline->scissor = scissor;
+		D3D11_DEPTH_STENCIL_DESC depthStencilDesc{};
+		depthStencilDesc.DepthEnable = true;
+		depthStencilDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		depthStencilDesc.DepthFunc = D3D11_COMPARISON_LESS;
+		depthStencilDesc.StencilEnable = false;
+		depthStencilDesc.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
+		depthStencilDesc.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK;
+
+		depthStencilDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+		depthStencilDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_INCR;
+		depthStencilDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+		depthStencilDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+		depthStencilDesc.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+		depthStencilDesc.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_INCR;
+		depthStencilDesc.BackFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+		depthStencilDesc.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+		D3D11_BLEND_DESC blendDesc{};
+		blendDesc.AlphaToCoverageEnable = false;
+		blendDesc.IndependentBlendEnable = false;
+		blendDesc.RenderTarget[0].BlendEnable = false;
+		blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+		blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+		blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+		blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+		float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+		graphicsPipeline = new GraphicsPipeline(
+			device,
+			D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+			nullptr, 0,
+			vertexShaderCode,
+			pixelShaderCode,
+			rasterizerDesc,
+			viewport,
+			scissor,
+			depthStencilDesc,
+			blendDesc,
+			blendFactor,
+			0xffffffff
+		);
 	}
 
 	void drawFrame() {
@@ -332,11 +443,7 @@ private:
 		}
 		assert(multisampleRTV);
 
-		graphicsPipeline->viewport.Width = static_cast<float>(width);
-		graphicsPipeline->viewport.Height = static_cast<float>(height);
-
-		graphicsPipeline->scissor.right = width;
-		graphicsPipeline->scissor.bottom = height;
+		graphicsPipeline->resize(width, height);
 	}
 };
 
