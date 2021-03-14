@@ -16,20 +16,20 @@
 
 struct GraphicsPipeline {
 	D3D_PRIMITIVE_TOPOLOGY primitiveTopology;
-	ID3D11InputLayout* inputLayout;
+	ID3D11InputLayout* inputLayout = nullptr;
 
-	ID3D11VertexShader* vertexShader;
+	ID3D11VertexShader* vertexShader = nullptr;
 
-	ID3D11RasterizerState* rasterizerState;
+	ID3D11RasterizerState* rasterizerState = nullptr;
 	D3D11_VIEWPORT viewport;
 	D3D11_RECT scissor;
 
-	ID3D11PixelShader* pixelShader;
+	ID3D11PixelShader* pixelShader = nullptr;
 
 	float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	uint32_t sampleMask = 0xffffffff;
-	ID3D11BlendState* blendState;
-	ID3D11DepthStencilState* depthStencilState;
+	ID3D11BlendState* blendState = nullptr;
+	ID3D11DepthStencilState* depthStencilState = nullptr;
 
 	GraphicsPipeline(
 		ID3D11Device* device,
@@ -47,40 +47,43 @@ struct GraphicsPipeline {
 		uint32_t blendSampleMask
 	): primitiveTopology(primitiveTopology), viewport(viewport), scissor(scissor), sampleMask(blendSampleMask) {
 		memcpy(this->blendFactor, blendFactor, ARRAYSIZE(this->blendFactor));
+		HRESULT hr;
 
-		device->CreateInputLayout(
-			inputElementDescs,
-			numInputElements,
-			vertexShaderBytecode.data(),
-			vertexShaderBytecode.size(),
-			&inputLayout
-		);
+		if (numInputElements > 0 || inputElementDescs) {
+			hr = device->CreateInputLayout(
+				inputElementDescs,
+				numInputElements,
+				vertexShaderBytecode.data(),
+				vertexShaderBytecode.size(),
+				&inputLayout
+			);
+		}
 
-		device->CreateVertexShader(
+		hr = device->CreateVertexShader(
 			vertexShaderBytecode.data(),
 			vertexShaderBytecode.size(),
 			nullptr,
 			&vertexShader
 		);
 
-		device->CreatePixelShader(
+		hr = device->CreatePixelShader(
 			pixelShaderBytecode.data(),
 			pixelShaderBytecode.size(),
 			nullptr,
 			&pixelShader
 		);
 
-		device->CreateRasterizerState(
+		hr = device->CreateRasterizerState(
 			&rasterizerDesc,
 			&rasterizerState
 		);
 
-		device->CreateDepthStencilState(
+		hr = device->CreateDepthStencilState(
 			&depthStencilDesc,
 			&depthStencilState
 		);
 
-		device->CreateBlendState(
+		hr = device->CreateBlendState(
 			&blendDesc,
 			&blendState
 		);
